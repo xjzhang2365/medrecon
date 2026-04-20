@@ -95,56 +95,56 @@ def recon_fista(kspace_under, mask, n_iter=60, lam=0.005, step=1.0):
     return recon, time.time() - t0
 
 
-# ── Learned ISTA (unrolled, PyTorch) ─────────────────────────────────────────
+# ── Learned ISTA (unrolled, pure numpy) ──────────────────────────────────────
 
 def recon_learned_ista(kspace_under, mask, n_unrolls=8):
     """
-    Lightweight unrolled ISTA network.
-    Each stage: gradient step (learnable step size) + soft threshold (learnable).
-    Initialised analytically — works without pre-training.
+    Unrolled ISTA with per-stage learnable step sizes and thresholds.
+    Parameters are optimised via simple gradient descent on data-consistency
+    loss — no PyTorch required, pure NumPy autodiff via finite differences.
     """
-    try:
-        import torch
-        import torch.nn as nn
-    except ImportError:
-        return recon_fista(kspace_under, mask)
-
     t0 = time.time()
 
-    class UnrolledISTA(nn.Module):
-        def __init__(self, n_stages):
-            super().__init__()
-            self.steps = nn.ParameterList([
-                nn.Parameter(torch.tensor(0.9)) for _ in range(n_stages)])
-            self.thresholds = nn.ParameterList([
-                nn.Parameter(torch.tensor(0.01)) for _ in range(n_stages)])
+    # Initialise learnable parameters
+    steps = np.full(n_unrolls, 0.9)
+    thresholds = np.full(n_unrolls, 0.01)
 
-        def forward(self, kspace, mask_t):
-            x = torch.abs(torch.fft.ifft2(torch.fft.ifftshift(kspace)))
-            for step, lam in zip(self.steps, self.thresholds):
-                kx = torch.fft.fftshift(torch.fft.fft2(x))
-                grad = torch.abs(torch.fft.ifft2(
-                    torch.fft.ifftshift((kx - kspace) * mask_t)))
-                x = torch.sign(x) * torch.clamp(
-                    torch.abs(x - step * grad) - torch.abs(lam), min=0)
-            return x
+    def forward(kspace, mask, steps, thresholds):
+        x = zero_filled(kspace)
+        for step, lam in zip(steps, thresholds):
+            kx = np.fft.fftshift(np.fft.fft2(x))
+            grad = np.fft.ifft2(np.fft.ifftshift((kx - kspace) * mask)).real
+            x = np.sign(x) * np.maximum(np.abs(x - step * grad) - abs(lam), 0)
+        return x
 
-    k_t = torch.from_numpy(kspace_under).cfloat()
-    m_t = torch.from_numpy(mask).float()
+    def data_loss(kspace, mask, steps, thresholds):
+        x = forward(kspace, mask, steps, thresholds)
+        kx = np.fft.fftshift(np.fft.fft2(x))
+        return np.mean(np.abs(kx * mask - kspace * mask) ** 2)
 
-    model = UnrolledISTA(n_unrolls)
-    opt = torch.optim.Adam(model.parameters(), lr=5e-3)
-    for _ in range(30):
-        opt.zero_grad()
-        out = model(k_t, m_t)
-        kout = torch.fft.fftshift(torch.fft.fft2(out))
-        loss = torch.mean(torch.abs(kout * m_t - k_t * m_t)**2)
-        loss.backward()
-        opt.step()
+    # Simple gradient descent with finite differences (lightweight, ~20 steps)
+    lr = 0.05
+    eps = 1e-4
+    base_loss = data_loss(kspace_under, mask, steps, thresholds)
 
-    with torch.no_grad():
-        recon = model(k_t, m_t).numpy()
+    for _ in range(20):
+        grad_steps = np.zeros_like(steps)
+        for i in range(n_unrolls):
+            s_plus = steps.copy(); s_plus[i] += eps
+            grad_steps[i] = (data_loss(kspace_under, mask, s_plus, thresholds) - base_loss) / eps
 
+        grad_thresh = np.zeros_like(thresholds)
+        for i in range(n_unrolls):
+            t_plus = thresholds.copy(); t_plus[i] += eps
+            grad_thresh[i] = (data_loss(kspace_under, mask, steps, t_plus) - base_loss) / eps
+
+        steps -= lr * grad_steps
+        thresholds -= lr * grad_thresh
+        steps = np.clip(steps, 0.1, 2.0)
+        thresholds = np.clip(thresholds, 1e-4, 0.1)
+        base_loss = data_loss(kspace_under, mask, steps, thresholds)
+
+    recon = forward(kspace_under, mask, steps, thresholds)
     recon = (recon - recon.min()) / (recon.max() - recon.min() + 1e-8)
     return recon, time.time() - t0
 
