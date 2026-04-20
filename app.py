@@ -11,6 +11,12 @@ from recon import (
     recon_fista, recon_learned_ista, compute_metrics
 )
 
+try:
+    from unet import UNet, recon_unet
+    UNET_AVAILABLE = True
+except Exception:
+    UNET_AVAILABLE = False
+
 # ── page config ───────────────────────────────────────────────────────────────
 
 st.set_page_config(
@@ -55,11 +61,15 @@ with st.sidebar:
     mask_type = st.selectbox("Sampling pattern", ["random", "equispaced"], index=0)
 
     st.subheader("Algorithm")
-    algo = st.radio(
-        "Reconstruction method",
-        ["FISTA (compressed sensing)", "Learned ISTA (unrolled network)", "Both (side by side)"],
-        index=0,
-    )
+    algo_options = [
+        "FISTA (compressed sensing)",
+        "Learned ISTA (unrolled network)",
+        "U-Net (deep learning)",
+        "All three (comparison)",
+    ]
+    if not UNET_AVAILABLE:
+        algo_options = [o for o in algo_options if "U-Net" not in o and "All" not in o]
+    algo = st.radio("Reconstruction method", algo_options, index=0)
 
     st.subheader("FISTA settings")
     n_iter = st.slider("Iterations", 20, 120, 60, step=10)
@@ -125,11 +135,12 @@ if run:
     zf = (zf_raw - zf_raw.min()) / (zf_raw.max() - zf_raw.min() + 1e-8)
     m_zf = compute_metrics(ground_truth, zf)
 
-    run_fista  = algo in ["FISTA (compressed sensing)", "Both (side by side)"]
-    run_lista  = algo in ["Learned ISTA (unrolled network)", "Both (side by side)"]
+    run_fista  = algo in ["FISTA (compressed sensing)", "All three (comparison)"]
+    run_lista  = algo in ["Learned ISTA (unrolled network)", "All three (comparison)"]
+    run_unet   = algo in ["U-Net (deep learning)", "All three (comparison)"] and UNET_AVAILABLE
 
-    fista_out = lista_out = None
-    m_f = m_l = None
+    fista_out = lista_out = unet_out = None
+    m_f = m_l = m_u = None
 
     with st.spinner("Running reconstruction..."):
         if run_fista:
@@ -141,6 +152,20 @@ if run:
             lista_out, t_l = recon_learned_ista(kunder, mask)
             m_l = compute_metrics(ground_truth, lista_out)
             m_l["time"] = round(t_l, 2)
+
+        if run_unet:
+            # Train once per session, cache in session state
+            if "unet_model" not in st.session_state:
+                with st.spinner("Training U-Net on synthetic phantoms (~20s, once per session)..."):
+                    unet = UNet()
+                    unet.train(
+                        kspace_fn=lambda img: simulate_kspace(img, acceleration, mask_type)[1:],
+                        n_samples=50, n_epochs=15,
+                    )
+                    st.session_state["unet_model"] = unet
+            unet_out, t_u = recon_unet(kunder, mask, st.session_state["unet_model"])
+            m_u = compute_metrics(ground_truth, unet_out)
+            m_u["time"] = round(t_u, 2)
 
     # ── image panels ─────────────────────────────────────────────────────────
 
@@ -161,34 +186,49 @@ if run:
         ax.axis("off")
         plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
 
-    if algo == "Both (side by side)":
+    if algo == "All three (comparison)":
+        results = [
+            (ground_truth, "Ground truth", None),
+            (zf,           "Zero-filled",  m_zf),
+            (fista_out,    "FISTA",         m_f),
+            (lista_out,    "Learned ISTA",  m_l),
+            (unet_out,     "U-Net",         m_u),
+        ]
+        results = [(img, lbl, met) for img, lbl, met in results if img is not None]
+        n = len(results)
+        fig, axes = plt.subplots(2, n, figsize=(3.5 * n, 7))
+        fig.subplots_adjust(hspace=0.35, wspace=0.1)
+        for col, (img, lbl, met) in enumerate(results):
+            show_panel(axes[0][col], img, lbl, met)
+            err = met["error_map"] if met else np.zeros_like(ground_truth)
+            show_error(axes[1][col], err, f"|error| {lbl}")
+
+    elif algo == "Both (side by side)":
         fig = plt.figure(figsize=(14, 6))
         gs = gridspec.GridSpec(2, 4, figure=fig, hspace=0.35, wspace=0.12)
         axes = [[fig.add_subplot(gs[r, c]) for c in range(4)] for r in range(2)]
-
         show_panel(axes[0][0], ground_truth, "Ground truth")
-        show_panel(axes[0][1], zf, "Zero-filled", m_zf)
-        show_panel(axes[0][2], fista_out,  "FISTA", m_f)
-        show_panel(axes[0][3], lista_out,  "Learned ISTA", m_l)
-
-        show_error(axes[1][0], m_zf["error_map"],  "|error| zero-filled")
-        show_error(axes[1][1], m_zf["error_map"],  "|error| zero-filled")   # placeholder spacer
-        show_error(axes[1][2], m_f["error_map"],   "|error| FISTA")
-        show_error(axes[1][3], m_l["error_map"],   "|error| Learned ISTA")
-        axes[1][1].set_visible(False)
+        show_panel(axes[0][1], zf,          "Zero-filled",  m_zf)
+        show_panel(axes[0][2], fista_out,   "FISTA",        m_f)
+        show_panel(axes[0][3], lista_out,   "Learned ISTA", m_l)
+        show_error(axes[1][0], np.zeros_like(ground_truth), "|error| ground truth")
+        show_error(axes[1][1], m_zf["error_map"], "|error| zero-filled")
+        show_error(axes[1][2], m_f["error_map"],  "|error| FISTA")
+        show_error(axes[1][3], m_l["error_map"],  "|error| Learned ISTA")
 
     else:
-        recon_img = fista_out if run_fista else lista_out
-        recon_metrics = m_f if run_fista else m_l
-        algo_label = "FISTA" if run_fista else "Learned ISTA"
-
+        recon_img    = fista_out or lista_out or unet_out
+        recon_metrics = m_f or m_l or m_u
+        algo_label   = (
+            "FISTA" if run_fista else
+            "Learned ISTA" if run_lista else
+            "U-Net"
+        )
         fig, axes = plt.subplots(2, 3, figsize=(12, 7))
         fig.subplots_adjust(hspace=0.35, wspace=0.1)
-
         show_panel(axes[0][0], ground_truth, "Ground truth")
         show_panel(axes[0][1], zf,           "Zero-filled (baseline)", m_zf)
         show_panel(axes[0][2], recon_img,    algo_label, recon_metrics)
-
         show_error(axes[1][0], np.zeros_like(ground_truth), "|error| ground truth")
         show_error(axes[1][1], m_zf["error_map"],            "|error| zero-filled")
         show_error(axes[1][2], recon_metrics["error_map"],   f"|error| {algo_label}")
@@ -209,6 +249,9 @@ if run:
     if m_l:
         rows.append({"Method": "Learned ISTA (unrolled network)",
                      "SSIM": m_l["SSIM"], "PSNR (dB)": m_l["PSNR"], "Time (s)": m_l["time"]})
+    if m_u:
+        rows.append({"Method": "U-Net (deep learning)",
+                     "SSIM": m_u["SSIM"], "PSNR (dB)": m_u["PSNR"], "Time (s)": m_u["time"]})
 
     st.table(rows)
 

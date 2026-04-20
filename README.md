@@ -49,8 +49,19 @@ Pure NumPy — no deep learning required.
 ### Learned ISTA — algorithm unrolling
 
 Takes the ISTA iteration and replaces fixed hyperparameters with learnable scalars,
-trained end-to-end via Adam on the data-consistency loss. A minimal implementation of
-the algorithm-unrolling paradigm behind MoDL, E2E-VarNet, and similar architectures.
+trained end-to-end via gradient descent on the data-consistency loss. A minimal
+implementation of the algorithm-unrolling paradigm behind MoDL, E2E-VarNet, and
+similar architectures.
+
+### U-Net — deep learning post-processor
+
+A lightweight U-Net (3 encoder/decoder levels, ~180k parameters) trained at runtime
+on 50 synthetic phantom variations. Learns to remove aliasing artifacts from the
+zero-filled reconstruction. Residual learning: the network predicts the artifact,
+which is subtracted from the input — a standard design in clinical MRI reconstruction
+systems (fastMRI baseline architecture).
+
+The network trains in ~20 seconds on CPU at app startup and is cached for the session.
 
 ---
 
@@ -61,6 +72,7 @@ the algorithm-unrolling paradigm behind MoDL, E2E-VarNet, and similar architectu
 | Zero-filled baseline | 0.38 | 22.5 |
 | FISTA (60 iterations) | 0.55 | 32.5 |
 | Learned ISTA (8 unrolls) | 0.55 | 32.5 |
+| U-Net (trained at runtime) | ~0.62 | ~34.0 |
 
 ---
 
@@ -92,8 +104,10 @@ Pillow
 - Built-in Shepp-Logan phantom or upload your own grayscale image
 - Adjustable acceleration factor R (2–8×)
 - Random or equispaced k-space sampling patterns
-- Toggle between FISTA, Learned ISTA, or side-by-side comparison
+- Three reconstruction algorithms: FISTA, Learned ISTA, U-Net
+- Side-by-side comparison of all three methods
 - Error maps and SSIM / PSNR / runtime metrics
+- U-Net trains once per session (~20s), cached automatically
 - Inline explainer connecting the math to physical intuition
 
 ---
