@@ -3,7 +3,7 @@ import os
 import time
 import onnxruntime as ort
 
-_ONNX_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "unet_mri.onnx")
+_ONNX_PATH = os.path.join(os.path.dirname(__file__), "unet_mri.onnx")
 
 if not os.path.exists(_ONNX_PATH):
     raise FileNotFoundError(
