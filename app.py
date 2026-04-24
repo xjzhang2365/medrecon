@@ -210,7 +210,7 @@ if run:
         show_error(axes[1][3], m_l["error_map"],  "|error| Learned ISTA")
 
     else:
-        recon_img    = fista_out or lista_out or unet_out
+        recon_img = next(x for x in [fista_out, lista_out, unet_out] if x is not None)
         recon_metrics = m_f or m_l or m_u
         algo_label   = (
             "FISTA" if run_fista else
