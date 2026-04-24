@@ -154,15 +154,8 @@ if run:
             m_l["time"] = round(t_l, 2)
 
         if run_unet:
-            # Train once per session, cache in session state
             if "unet_model" not in st.session_state:
-                with st.spinner("Training U-Net on synthetic phantoms (~20s, once per session)..."):
-                    unet = UNet()
-                    unet.train(
-                        kspace_fn=lambda img: simulate_kspace(img, acceleration, mask_type)[1:],
-                        n_samples=50, n_epochs=15,
-                    )
-                    st.session_state["unet_model"] = unet
+                st.session_state["unet_model"] = UNet()
             unet_out, t_u = recon_unet(kunder, mask, st.session_state["unet_model"])
             m_u = compute_metrics(ground_truth, unet_out)
             m_u["time"] = round(t_u, 2)
