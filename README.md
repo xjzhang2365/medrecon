@@ -3,7 +3,7 @@
 An interactive demo of compressed sensing and learned reconstruction for accelerated MRI,
 built to show how physics-informed inverse problem solvers transfer across imaging modalities.
 
-**Live demo:** *(add Streamlit Cloud link here after deploying)*  
+**[▶ Live Demo](https://xjzhang2365-medrecon.streamlit.app)**  
 **Related work:** [3D TEM Reconstruction Pipeline](https://github.com/xjzhang2365/3D-Reconstruction-Low-Dose-Imaging) · [arXiv preprint](https://arxiv.org/abs/2604.07271)
 
 ---
@@ -55,13 +55,15 @@ similar architectures.
 
 ### U-Net — deep learning post-processor
 
-A lightweight U-Net (3 encoder/decoder levels, ~180k parameters) trained at runtime
-on 50 synthetic phantom variations. Learns to remove aliasing artifacts from the
-zero-filled reconstruction. Residual learning: the network predicts the artifact,
-which is subtracted from the input — a standard design in clinical MRI reconstruction
-systems (fastMRI baseline architecture).
+A lightweight U-Net (3 encoder/decoder levels, ~180k parameters) deployed via
+[ONNX Runtime](https://onnxruntime.ai/) for dependency-free inference. The network
+is structured as a residual learner: it predicts the aliasing artifact, which is
+subtracted from the zero-filled reconstruction — a standard design in clinical MRI
+reconstruction systems (fastMRI baseline architecture).
 
-The network trains in ~20 seconds on CPU at app startup and is cached for the session.
+> **Note:** The current ONNX model uses random weights and serves as a structural
+> demonstration of the learned reconstruction pathway. The FISTA and Learned ISTA
+> paths produce quantitatively meaningful results.
 
 ---
 
@@ -72,14 +74,13 @@ The network trains in ~20 seconds on CPU at app startup and is cached for the se
 | Zero-filled baseline | 0.38 | 22.5 |
 | FISTA (60 iterations) | 0.55 | 32.5 |
 | Learned ISTA (8 unrolls) | 0.55 | 32.5 |
-| U-Net (trained at runtime) | ~0.62 | ~34.0 |
 
 ---
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/medrecon
+git clone https://github.com/xjzhang2365/medrecon
 cd medrecon
 pip install -r requirements.txt
 streamlit run app.py
@@ -92,10 +93,12 @@ streamlit
 numpy
 scipy
 scikit-image
-torch
 matplotlib
 Pillow
+onnxruntime
 ```
+
+No PyTorch required — inference runs via ONNX Runtime.
 
 ---
 
@@ -105,10 +108,24 @@ Pillow
 - Adjustable acceleration factor R (2–8×)
 - Random or equispaced k-space sampling patterns
 - Three reconstruction algorithms: FISTA, Learned ISTA, U-Net
-- Side-by-side comparison of all three methods
+- Side-by-side comparison of reconstruction methods
 - Error maps and SSIM / PSNR / runtime metrics
-- U-Net trains once per session (~20s), cached automatically
 - Inline explainer connecting the math to physical intuition
+
+---
+
+## Repository structure
+
+```
+medrecon/
+├── app.py            # Streamlit UI
+├── recon.py          # FISTA and Learned ISTA (pure NumPy)
+├── unet.py           # U-Net inference via ONNX Runtime
+├── unet_mri.onnx     # Exported model (~180k params)
+├── export_onnx.py    # Script to regenerate ONNX from PyTorch weights
+├── assets/           # Static assets
+└── requirements.txt
+```
 
 ---
 
@@ -116,7 +133,7 @@ Pillow
 
 **Xiaojun Zhang** — Computational Imaging Scientist  
 PhD, Computational Science, City University of Hong Kong  
-[GitHub](https://github.com/xjzhang2365) · [LinkedIn](https://linkedin.com/in/YOUR_PROFILE)
+[GitHub](https://github.com/xjzhang2365) · [LinkedIn](https://www.linkedin.com/in/xiaojun-zhang-9b8495321) · [arXiv](https://arxiv.org/abs/2604.07271)
 
-*This demo is part of a broader research programme on physics-informed inverse problems
+*This project is part of a broader research programme on physics-informed inverse problems
 for scientific imaging, spanning electron microscopy and medical imaging.*
